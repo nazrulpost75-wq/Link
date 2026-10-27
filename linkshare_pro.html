@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LinkShare Pro</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1020;color:#f4f6ff;font-family:Arial,sans-serif}
+header{padding:24px 16px;text-align:center;background:#121a30;border-bottom:1px solid #283452}
+h1{margin:0;color:#ff5364}header p{color:#aab6d3}
+main{max-width:760px;margin:auto;padding:18px}
+input,textarea,button{font:inherit;border-radius:10px;padding:12px;width:100%;margin:6px 0}
+input,textarea{background:#111a30;color:white;border:1px solid #34415f}
+button{background:#ff5364;color:white;border:0;font-weight:bold;cursor:pointer}
+button.secondary{background:#26334e}
+.card{background:#141e34;border:1px solid #293754;padding:16px;border-radius:14px;margin:12px 0;overflow-wrap:anywhere}
+.card h3{margin:0 0 8px}.muted{color:#aab6d3;font-size:14px}
+.actions{display:flex;gap:8px}.actions button{flex:1}
+.hidden{display:none!important}
+#status{padding:10px;color:#9ed9ff;overflow-wrap:anywhere}
+footer{text-align:center;padding:20px;color:#8290ae}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔗 LinkShare Pro</h1>
+  <p>সব প্রয়োজনীয় লিংক এক জায়গায়</p>
+</header>
+<main>
+  <input id="search" placeholder="🔍 লিংক খুঁজুন..." />
+  <div id="status">Firebase সংযোগের অপেক্ষায়...</div>
+  <section id="links"></section>
+
+  <div class="card">
+    <h3>🔐 অ্যাডমিন লগইন</h3>
+    <p class="muted">Firebase Authentication-এর অ্যাডমিন ইমেইল ও পাসওয়ার্ড দিন।</p>
+    <input id="email" type="email" placeholder="Admin email">
+    <input id="password" type="password" placeholder="Admin password">
+    <button id="login">Login</button>
+    <button id="logout" class="secondary hidden">Logout</button>
+  </div>
+
+  <section id="panel" class="card hidden">
+    <h3>➕ নতুন লিংক যোগ করুন</h3>
+    <input id="title" placeholder="লিংকের নাম">
+    <input id="url" type="url" placeholder="https://example.com">
+    <textarea id="description" placeholder="লিংকের বিবরণ"></textarea>
+    <button id="add">লিংক যোগ করুন</button>
+    <p class="muted">নিচের প্রতিটি কার্ডে ডিলিট বাটনও থাকবে।</p>
+  </section>
+</main>
+<footer>LinkShare Pro · Shared links for everyone</footer>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDGX2MVT8a0rQWEqhfNEo8vsu9qurTOEYg",
+  authDomain: "task-2393c.firebaseapp.com",
+  databaseURL: "https://task-2393c-default-rtdb.firebaseio.com",
+  projectId: "task-2393c",
+  storageBucket: "task-2393c.firebasestorage.app",
+  messagingSenderId: "606002847144",
+  appId: "1:606002847144:web:456ea43cd64e502723919d",
+  measurementId: "G-WCD3GBVWXT"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+const linksRef = db.ref("sharedLinks");
+
+const $ = id => document.getElementById(id);
+let links = {};
+let currentUser = null;
+
+function status(message){ $("status").textContent = message; }
+
+function safeUrl(value){
+  try{
+    const u = new URL(value);
+    return ["https:","http:"].includes(u.protocol) ? u.href : null;
+  }catch{return null;}
+}
+
+function render(){
+  const q = $("search").value.trim().toLowerCase();
+  const root = $("links");
+  root.replaceChildren();
+
+  const items = Object.entries(links).filter(([id,x]) =>
+    `${x.title||""} ${x.description||""} ${x.url||""}`
+      .toLowerCase().includes(q)
+  );
+
+  if(!items.length){
+    root.textContent = "কোনো লিংক পাওয়া যায়নি।";
+    return;
+  }
+
+  items.forEach(([id,x])=>{
+    const card = document.createElement("article");
+    card.className = "card";
+    const heading = document.createElement("h3");
+    heading.textContent = x.title || "Untitled";
+    const desc = document.createElement("p");
+    desc.className = "muted";
+    desc.textContent = x.description || "";
+    const link = document.createElement("p");
+    link.className = "muted";
+    link.textContent = x.url || "";
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const open = document.createElement("button");
+    open.textContent = "Open";
+    open.onclick = ()=>{
+      const url = safeUrl(x.url);
+      if(url) window.open(url,"_blank","noopener,noreferrer");
+    };
+
+    const copy = document.createElement("button");
+    copy.textContent = "Copy";
+    copy.className = "secondary";
+    copy.onclick = async ()=>{
+      try{
+        await navigator.clipboard.writeText(x.url);
+        status("লিংক কপি হয়েছে।");
+      }catch{
+        status("কপি করা যায়নি। লিংকটি ম্যানুয়ালি কপি করুন।");
+      }
+    };
+
+    actions.append(open,copy);
+
+    if(currentUser){
+      const del = document.createElement("button");
+      del.textContent = "Delete";
+      del.className = "secondary";
+      del.onclick = async ()=>{
+        if(confirm("এই লিংকটি মুছে ফেলবেন?")){
+          try{
+            await linksRef.child(id).remove();
+            status("লিংক মুছে ফেলা হয়েছে।");
+          }catch(e){status("Delete failed: "+e.message);}
+        }
+      };
+      actions.append(del);
+    }
+
+    card.append(heading,desc,link,actions);
+    root.append(card);
+  });
+}
+
+$("search").addEventListener("input",render);
+
+auth.onAuthStateChanged(user=>{
+  currentUser = user;
+  $("panel").classList.toggle("hidden",!user);
+  $("logout").classList.toggle("hidden",!user);
+  $("login").classList.toggle("hidden",!!user);
+  $("email").classList.toggle("hidden",!!user);
+  $("password").classList.toggle("hidden",!!user);
+  render();
+});
+
+$("login").onclick = async ()=>{
+  const email = $("email").value.trim();
+  const password = $("password").value;
+  try{
+    await auth.signInWithEmailAndPassword(email,password);
+    status("লগইন সফল।");
+  }catch(e){status("Login failed: "+e.message);}
+};
+
+$("logout").onclick = ()=>auth.signOut();
+
+$("add").onclick = async ()=>{
+  if(!currentUser){status("প্রথমে লগইন করুন।");return;}
+  const title = $("title").value.trim();
+  const url = safeUrl($("url").value.trim());
+  const description = $("description").value.trim();
+
+  if(!title || !url){
+    status("লিংকের নাম ও সঠিক URL দিন।");
+    return;
+  }
+
+  try{
+    await linksRef.push({
+      title,url,description,
+      createdAt:firebase.database.ServerValue.TIMESTAMP
+    });
+    $("title").value="";
+    $("url").value="";
+    $("description").value="";
+    status("লিংক যোগ হয়েছে এবং সবার তালিকায় দেখা যাবে।");
+  }catch(e){status("লিংক যোগ করা যায়নি: "+e.message);}
+};
+
+linksRef.on("value",snapshot=>{
+  links = snapshot.val() || {};
+  render();
+  status("অনলাইন লিংক তালিকা সংযুক্ত।");
+},error=>{
+  status("Firebase Database Error: "+error.message);
+});
+</script>
+</body>
+</html>
